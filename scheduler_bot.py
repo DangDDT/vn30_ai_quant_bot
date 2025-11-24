@@ -123,9 +123,14 @@ def generate_market_report(report_type="morning"):
     
     logger.info(f"🔄 Bắt đầu quét {len(VN30_LIST)} cổ phiếu VN30...")
     
-    for symbol in VN30_LIST:
+    for i, symbol in enumerate(VN30_LIST):
         try:
-            logger.info(f"  → Đang phân tích {symbol}...")
+            logger.info(f"  → [{i+1}/{len(VN30_LIST)}] Đang phân tích {symbol}...")
+            
+            # Add small delay between stocks to avoid rate limit
+            if i > 0:
+                time.sleep(0.5)  # 500ms delay between stocks
+            
             df = get_data(symbol, days=365)
             
             if df is None or len(df) < 200:

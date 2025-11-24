@@ -12,6 +12,7 @@ from vn30_quant_bot import get_data, analyze_signal, AI_Forecaster, VN30_LIST, A
 from openai import OpenAI
 import feedparser
 from textblob import TextBlob
+import requests
 
 # === Streamlit Cloud Secrets Support ===
 # Check if running on Streamlit Cloud (has st.secrets) or locally (use os.environ)

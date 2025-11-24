@@ -40,60 +40,75 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- 1. Data Acquisition ---
-def get_data(symbol, days=None):
+def get_data(symbol, days=None, retry=3, delay=1.5):
     """
-    Fetch OHLCV data for a symbol from vnstock.
+    Fetch OHLCV data for a symbol from vnstock with retry & rate limiting.
     Args:
         symbol: Stock symbol
         days: Number of days back to fetch. If None, uses default AI_TRAIN_YEARS * 365
+        retry: Number of retry attempts
+        delay: Initial delay between retries (exponential backoff)
     Returns a clean DataFrame or None if failed.
     """
-    try:
-        end_date = datetime.datetime.now().strftime('%Y-%m-%d')
-        
-        if days:
-             start_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
-        else:
-             start_date = (datetime.datetime.now() - datetime.timedelta(days=AI_TRAIN_YEARS * 365)).strftime('%Y-%m-%d')
-        
-        # Fetch data using Vnstock class (v3.x)
-        stock = Vnstock().stock(symbol=symbol, source='VCI')
-        df = stock.quote.history(start=start_date, end=end_date, interval='1D')
-        
-        if df is None or df.empty:
-            logger.warning(f"No data found for {symbol}")
-            return None
-
-        # Standardize columns
-        # vnstock returned: time, open, high, low, close, volume
-        df.columns = [c.lower() for c in df.columns]
-        
-        # Ensure 'time' is index
-        if 'time' in df.columns:
-            df['time'] = pd.to_datetime(df['time'])
-            df.set_index('time', inplace=True)
-        elif 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'])
-            df.set_index('date', inplace=True)
-
-        # Sort by date
-        df.sort_index(inplace=True)
-
-        # Ensure numeric types for OHLCV
-        cols = ['open', 'high', 'low', 'close', 'volume']
-        for col in cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+    for attempt in range(retry):
+        try:
+            # Add delay to avoid rate limiting
+            if attempt > 0:
+                wait_time = delay * (2 ** (attempt - 1))  # 1.5s, 3s, 6s
+                logger.info(f"⏳ Retry {attempt + 1}/{retry} for {symbol} after {wait_time:.1f}s...")
+                time.sleep(wait_time)
+            
+            end_date = datetime.datetime.now().strftime('%Y-%m-%d')
+            
+            if days:
+                 start_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
             else:
-                logger.error(f"Missing column {col} in data for {symbol}")
+                 start_date = (datetime.datetime.now() - datetime.timedelta(days=AI_TRAIN_YEARS * 365)).strftime('%Y-%m-%d')
+            
+            # Fetch data using Vnstock class (v3.x)
+            stock = Vnstock().stock(symbol=symbol, source='VCI')
+            df = stock.quote.history(start=start_date, end=end_date, interval='1D')
+            
+            if df is None or df.empty:
+                logger.warning(f"⚠️ No data for {symbol} (attempt {attempt + 1}/{retry})")
+                if attempt < retry - 1:
+                    continue
                 return None
-                
-        df.dropna(inplace=True)
-        return df
-        
-    except Exception as e:
-        logger.error(f"Error fetching data for {symbol}: {e}")
-        return None
+
+            # Standardize columns
+            df.columns = [c.lower() for c in df.columns]
+            
+            # Ensure 'time' is index
+            if 'time' in df.columns:
+                df['time'] = pd.to_datetime(df['time'])
+                df.set_index('time', inplace=True)
+            elif 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+                df.set_index('date', inplace=True)
+
+            # Sort by date
+            df.sort_index(inplace=True)
+
+            # Ensure numeric types for OHLCV
+            cols = ['open', 'high', 'low', 'close', 'volume']
+            for col in cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                else:
+                    logger.error(f"❌ Missing column {col} for {symbol}")
+                    return None
+                    
+            df.dropna(inplace=True)
+            logger.info(f"✅ Fetched {len(df)} rows for {symbol}")
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ Error for {symbol} (attempt {attempt + 1}/{retry}): {e}")
+            if attempt == retry - 1:
+                logger.error(f"⚠️ Failed {symbol} after {retry} attempts")
+                return None
+    
+    return None
 
 # --- 2. Technical Analysis (The Filter) ---
 def analyze_signal(df):
