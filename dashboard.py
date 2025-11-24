@@ -8,7 +8,7 @@ import time
 
 # Import core logic from the bot
 # Ensure vn30_quant_bot.py is in the same directory
-from vn30_quant_bot import get_data, analyze_signal, AI_Forecaster, VN30_LIST, AI_LOOKBACK
+from vn30_quant_bot import get_data, analyze_signal, AI_Forecaster, VN30_LIST, AI_LOOKBACK, TORCH_AVAILABLE
 from openai import OpenAI
 import feedparser
 from textblob import TextBlob
@@ -402,26 +402,27 @@ with col_right:
         # --- Section 2: AI Forecast (Auto Run) ---
         st.markdown("### 🔮 Dự Báo AI (Deep Learning)")
         
-        # Check cache or session state to avoid re-running AI unnecessarily if symbol hasn't changed
-        # But user requested "Auto fetch all info", so we run it.
-        # We can use a simple check:
-        ai_key = f"ai_pred_{symbol}_{days_back}"
-        
-        if ai_key not in st.session_state:
-             with st.spinner("🤖 AI đang học và dự báo..."):
-                try:
-                    forecaster = AI_Forecaster(symbol, df, lookback=ai_lookback)
-                    x_train, y_train = forecaster.prepare_data()
-                    forecaster.build_and_train(x_train, y_train)
-                    pred_price = forecaster.predict_next_day()
-                    st.session_state[ai_key] = pred_price
-                except Exception as e:
-                    st.error(f"Lỗi AI: {e}")
-                    st.session_state[ai_key] = None
+        if not TORCH_AVAILABLE:
+            st.warning("⚠️ PyTorch không khả dụng. Tính năng AI đã bị vô hiệu hóa để tiết kiệm tài nguyên trên Streamlit Cloud. Chỉ phân tích kỹ thuật (TA) vẫn hoạt động.")
+            pred_price = None
+        else:
+            ai_key = f"ai_pred_{symbol}_{days_back}"
+            
+            if ai_key not in st.session_state:
+                 with st.spinner("🤖 AI đang học và dự báo..."):
+                    try:
+                        forecaster = AI_Forecaster(symbol, df, lookback=ai_lookback)
+                        x_train, y_train = forecaster.prepare_data()
+                        forecaster.build_and_train(x_train, y_train)
+                        pred_price = forecaster.predict_next_day()
+                        st.session_state[ai_key] = pred_price
+                    except Exception as e:
+                        st.error(f"Lỗi AI: {e}")
+                        st.session_state[ai_key] = None
 
-        pred_price = st.session_state.get(ai_key)
+            pred_price = st.session_state.get(ai_key)
         
-        if pred_price:
+        if pred_price and TORCH_AVAILABLE:
             current_price = df['close'].iloc[-1]
             change = ((pred_price - current_price) / current_price) * 100
             

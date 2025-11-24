@@ -6,11 +6,21 @@ import requests
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for Streamlit
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import MinMaxScaler
-import torch
-import torch.nn as nn
+
+# Try importing torch, but don't fail if not available
+try:
+    import torch
+    import torch.nn as nn
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+    logging.warning("⚠️ PyTorch not available. AI features will be disabled.")
+
 from vnstock import Vnstock
 
 # --- Configuration & Constants ---
@@ -223,143 +233,138 @@ def analyze_signal(df):
     return recommendation
 
 # --- 3. AI Module (Deep Dive) ---
-class LSTMModel(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, output_size, dropout=0.2):
-        super(LSTMModel, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
-        self.fc = nn.Linear(hidden_size, output_size)
-    
-    def forward(self, x):
-        # Initialize hidden and cell states
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
-        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+if TORCH_AVAILABLE:
+    class LSTMModel(nn.Module):
+        def __init__(self, input_size, hidden_size, num_layers, output_size, dropout=0.2):
+            super(LSTMModel, self).__init__()
+            self.hidden_size = hidden_size
+            self.num_layers = num_layers
+            self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
+            self.fc = nn.Linear(hidden_size, output_size)
         
-        # Forward propagate LSTM
-        out, _ = self.lstm(x, (h0, c0))
-        
-        # Decode the hidden state of the last time step
-        out = self.fc(out[:, -1, :])
-        return out
+        def forward(self, x):
+            # Initialize hidden and cell states
+            h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+            c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+            
+            # Forward propagate LSTM
+            out, _ = self.lstm(x, (h0, c0))
+            
+            # Decode the hidden state of the last time step
+            out = self.fc(out[:, -1, :])
+            return out
 
-class AI_Forecaster:
-    def __init__(self, symbol, df, lookback=60):
-        self.symbol = symbol
-        self.df = df
-        self.lookback = lookback
-        self.scaler = MinMaxScaler(feature_range=(0, 1))
-        self.model = None
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # M1/M2 Macs can use MPS but for simple models CPU is often stable and fast enough.
-        # Uncomment line below to use MPS if desired and available.
-        # if torch.backends.mps.is_available(): self.device = torch.device('mps')
-        
-    def prepare_data(self):
-        # We only need 'close' price for this specific simple LSTM model as requested
-        data = self.df.filter(['close']).values
-        scaled_data = self.scaler.fit_transform(data)
-        
-        x_train = []
-        y_train = []
-        
-        # Create sequences
-        if len(scaled_data) <= self.lookback:
-            raise ValueError("Not enough data for AI training")
+if TORCH_AVAILABLE:
+    class AI_Forecaster:
+        def __init__(self, symbol, df, lookback=60):
+            self.symbol = symbol
+            self.df = df
+            self.lookback = lookback
+            self.scaler = MinMaxScaler(feature_range=(0, 1))
+            self.model = None
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             
-        for i in range(self.lookback, len(scaled_data)):
-            x_train.append(scaled_data[i-self.lookback:i, 0])
-            y_train.append(scaled_data[i, 0])
+        def prepare_data(self):
+            data = self.df.filter(['close']).values
+            scaled_data = self.scaler.fit_transform(data)
             
-        x_train, y_train = np.array(x_train), np.array(y_train)
-        
-        # Reshape for LSTM [samples, time steps, features]
-        x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
-        
-        return x_train, y_train
-        
-    def build_and_train(self, x_train, y_train):
-        # Convert to PyTorch tensors
-        x_train_tensor = torch.from_numpy(x_train).float().to(self.device)
-        y_train_tensor = torch.from_numpy(y_train).float().to(self.device)
-        
-        # Hyperparameters
-        input_size = 1
-        hidden_size = 50
-        num_layers = 2
-        output_size = 1
-        num_epochs = 20
-        learning_rate = 0.001
-        
-        self.model = LSTMModel(input_size, hidden_size, num_layers, output_size).to(self.device)
-        
-        criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        
-        # Train
-        self.model.train()
-        for epoch in range(num_epochs):
-            outputs = self.model(x_train_tensor)
-            optimizer.zero_grad()
-            loss = criterion(outputs, y_train_tensor.view(-1, 1))
-            loss.backward()
-            optimizer.step()
+            x_train = []
+            y_train = []
             
-    def predict_next_day(self):
-        # Get last self.lookback days
-        data = self.df.filter(['close']).values
-        last_lookback = data[-self.lookback:]
-        scaled_last_lookback = self.scaler.transform(last_lookback)
-        
-        # Reshape for LSTM
-        X_test = scaled_last_lookback.reshape(1, self.lookback, 1)
-        X_test_tensor = torch.from_numpy(X_test).float().to(self.device)
-        
-        self.model.eval()
-        with torch.no_grad():
-            pred_scaled = self.model(X_test_tensor)
+            if len(scaled_data) <= self.lookback:
+                raise ValueError("Not enough data for AI training")
+                
+            for i in range(self.lookback, len(scaled_data)):
+                x_train.append(scaled_data[i-self.lookback:i, 0])
+                y_train.append(scaled_data[i, 0])
+                
+            x_train, y_train = np.array(x_train), np.array(y_train)
+            x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
             
-        pred_price = self.scaler.inverse_transform(pred_scaled.cpu().numpy())
+            return x_train, y_train
+            
+        def build_and_train(self, x_train, y_train):
+            x_train_tensor = torch.from_numpy(x_train).float().to(self.device)
+            y_train_tensor = torch.from_numpy(y_train).float().to(self.device)
+            
+            input_size = 1
+            hidden_size = 50
+            num_layers = 2
+            output_size = 1
+            num_epochs = 20
+            learning_rate = 0.001
+            
+            self.model = LSTMModel(input_size, hidden_size, num_layers, output_size).to(self.device)
+            
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+            
+            self.model.train()
+            for epoch in range(num_epochs):
+                outputs = self.model(x_train_tensor)
+                optimizer.zero_grad()
+                loss = criterion(outputs, y_train_tensor.view(-1, 1))
+                loss.backward()
+                optimizer.step()
+                
+        def predict_next_day(self):
+            data = self.df.filter(['close']).values
+            last_lookback = data[-self.lookback:]
+            scaled_last_lookback = self.scaler.transform(last_lookback)
+            
+            X_test = scaled_last_lookback.reshape(1, self.lookback, 1)
+            X_test_tensor = torch.from_numpy(X_test).float().to(self.device)
+            
+            self.model.eval()
+            with torch.no_grad():
+                pred_scaled = self.model(X_test_tensor)
+                
+            pred_price = self.scaler.inverse_transform(pred_scaled.cpu().numpy())
+            
+            return float(pred_price[0][0])
+            
+        def generate_chart(self, predicted_price):
+            """Generate comparison chart"""
+            plt.style.use('seaborn-v0_8-darkgrid')
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+            
+            ax1.plot(self.df.index, self.df['close'], label='Close Price', color='blue')
+            ax1.set_title(f"{self.symbol} - 5 Year History")
+            ax1.legend()
+            
+            last_90 = self.df.tail(90).copy()
+            last_date = last_90.index[-1]
+            next_date = last_date + datetime.timedelta(days=1)
+            
+            ax2.plot(last_90.index, last_90['close'], label='Actual', color='blue')
+            ax2.plot([last_date, next_date], [last_90['close'].iloc[-1], predicted_price], 
+                     linestyle='--', marker='o', color='red', label='AI Prediction')
+            
+            ax2.set_title(f"{self.symbol} - Last 90 Days & AI Forecast")
+            ax2.legend()
+            
+            chart_path = f"temp_chart_{self.symbol}.png"
+            plt.tight_layout()
+            plt.savefig(chart_path)
+            plt.close()
+            return chart_path
+else:
+    # Dummy AI_Forecaster when torch is not available
+    class AI_Forecaster:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("PyTorch is not available. AI features are disabled.")
         
-        return float(pred_price[0][0])
+        def prepare_data(self):
+            raise ImportError("PyTorch is not available")
         
-    def generate_chart(self, predicted_price):
-        """
-        Generate comparison chart:
-        1. Top: 5-Year Price History
-        2. Bottom: Last 90 Days Zoom (Actual vs Predicted for tomorrow appended)
-        """
-        plt.style.use('seaborn-v0_8-darkgrid')
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+        def build_and_train(self, *args):
+            raise ImportError("PyTorch is not available")
         
-        # Top Plot: 5 Years
-        ax1.plot(self.df.index, self.df['close'], label='Close Price', color='blue')
-        ax1.set_title(f"{self.symbol} - 5 Year History")
-        ax1.legend()
+        def predict_next_day(self):
+            raise ImportError("PyTorch is not available")
         
-        # Bottom Plot: Last 90 Days + Prediction
-        last_90 = self.df.tail(90).copy()
-        
-        # Create a future date for the prediction
-        last_date = last_90.index[-1]
-        next_date = last_date + datetime.timedelta(days=1)
-        # If next day is weekend, strictly speaking markets are closed, but for vis we just add 1 day or find next business day.
-        # Simple add 1 day for chart.
-        
-        ax2.plot(last_90.index, last_90['close'], label='Actual', color='blue')
-        
-        # Plot the prediction as a distinct point/line from the last actual point
-        ax2.plot([last_date, next_date], [last_90['close'].iloc[-1], predicted_price], 
-                 linestyle='--', marker='o', color='red', label='AI Prediction')
-        
-        ax2.set_title(f"{self.symbol} - Last 90 Days & AI Forecast")
-        ax2.legend()
-        
-        chart_path = f"temp_chart_{self.symbol}.png"
-        plt.tight_layout()
-        plt.savefig(chart_path)
-        plt.close()
-        return chart_path
+        def generate_chart(self, *args):
+            raise ImportError("PyTorch is not available")
 
 # --- 4. Telegram Reporter ---
 def send_alert(symbol, signal, price, ai_price, indicators, image_path, reasons):
