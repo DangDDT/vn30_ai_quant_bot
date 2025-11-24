@@ -115,6 +115,11 @@ def get_data(symbol, days=None, retry=3, delay=1.5):
 
             # Sort by date
             df.sort_index(inplace=True)
+            
+            # Remove duplicate timestamps (keep last occurrence)
+            if df.index.duplicated().any():
+                logger.warning(f"⚠️ Found {df.index.duplicated().sum()} duplicate timestamps for {symbol}, removing...")
+                df = df[~df.index.duplicated(keep='last')]
 
             # Ensure numeric types for OHLCV
             cols = ['open', 'high', 'low', 'close', 'volume']
@@ -126,6 +131,11 @@ def get_data(symbol, days=None, retry=3, delay=1.5):
                     return None
                     
             df.dropna(inplace=True)
+            
+            # Final check for duplicates after cleaning
+            if df.index.duplicated().any():
+                df = df[~df.index.duplicated(keep='last')]
+            
             logger.info(f"✅ Fetched {len(df)} rows for {symbol}")
             return df
             
