@@ -76,8 +76,25 @@ def get_data(symbol, days=None, retry=3, delay=1.5):
                  start_date = (datetime.datetime.now() - datetime.timedelta(days=AI_TRAIN_YEARS * 365)).strftime('%Y-%m-%d')
             
             # Fetch data using Vnstock class (v3.x)
-            stock = Vnstock().stock(symbol=symbol, source='VCI')
-            df = stock.quote.history(start=start_date, end=end_date, interval='1D')
+            # Try multiple sources: VCI, TCBS, MSN
+            sources = ['TCBS', 'VCI', 'MSN']
+            df = None
+            
+            for src in sources:
+                try:
+                    logger.info(f"  Trying source: {src} for {symbol}...")
+                    stock = Vnstock().stock(symbol=symbol, source=src)
+                    df = stock.quote.history(start=start_date, end=end_date, interval='1D')
+                    
+                    if df is not None and not df.empty:
+                        logger.info(f"  ✅ Success with source: {src}")
+                        break
+                except Exception as e:
+                    logger.warning(f"  ⚠️ Failed with {src}: {e}")
+                    continue
+            
+            if df is None:
+                df = None  # Ensure df is set for later check
             
             if df is None or df.empty:
                 logger.warning(f"⚠️ No data for {symbol} (attempt {attempt + 1}/{retry})")
