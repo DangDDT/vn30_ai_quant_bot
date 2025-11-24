@@ -1,0 +1,16 @@
+torch
+numpy
+pandas
+pandas_ta
+scikit-learn
+matplotlib
+seaborn
+requests
+streamlit
+plotly
+vnstock>=0.2.8
+openai
+beautifulsoup4
+feedparser
+textblob
+schedule

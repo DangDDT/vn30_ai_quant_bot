@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Logs
+*.log
+bot_activity.log
+scheduler_activity.log
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+
+# AI Generated Images
+*.png
+*.jpg
+*.jpeg
+!README_assets/*.png
+
+# Temporary files
+temp/
+tmp/
+

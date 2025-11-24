@@ -1,0 +1,9 @@
+# System-level dependencies for Streamlit Cloud (Ubuntu)
+# These packages are needed for Python libraries to work properly
+
+# For matplotlib
+libgomp1
+
+# For scientific computing
+build-essential
+
